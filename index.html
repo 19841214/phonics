@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phonics Fireworks - 聲控煙火秀</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Noto+Sans+TC:wght@500&display=swap');
+
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #111; 
+            font-family: 'Fredoka One', cursive, sans-serif;
+            user-select: none;
+        }
+
+        canvas { 
+            display: block; 
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        #ui {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+            width: 100%;
+        }
+
+        .word-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        #word-display {
+            font-size: 8rem;
+            color: #fff;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 4px 4px 0px #333;
+            letter-spacing: 5px;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+            cursor: pointer;
+        }
+        
+        #word-display:active {
+            transform: scale(0.95);
+        }
+
+        #chinese-hint {
+            font-family: 'Noto Sans TC', sans-serif;
+            font-size: 2rem;
+            color: #aaa;
+            margin-top: 10px;
+            opacity: 0.8;
+            font-weight: normal;
+        }
+
+        #status {
+            color: #00ffaa;
+            margin-top: 20px;
+            font-size: 1.5rem;
+            font-family: 'Noto Sans TC', sans-serif;
+            min-height: 1.5em;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            font-size: 1.5rem;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-family: 'Noto Sans TC', sans-serif;
+            transition: transform 0.1s, box-shadow 0.1s;
+            outline: none;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        #start-btn {
+            background: linear-gradient(135deg, #ff0055, #ff5500);
+            color: white;
+            box-shadow: 0 0 20px rgba(255, 0, 85, 0.5);
+            margin-top: 20px;
+        }
+
+        #hint-btn {
+            background: #444;
+            color: white;
+            font-size: 1rem;
+            padding: 10px 20px;
+            margin-top: 20px;
+            border-radius: 20px;
+            display: none;
+        }
+        
+        #hint-btn:hover {
+            background: #666;
+        }
+
+        #loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #111;
+            z-index: 20;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            font-family: 'Noto Sans TC', sans-serif;
+        }
+
+        .loader {
+            border: 5px solid #333;
+            border-top: 5px solid #ff0055;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <!-- 載入層 -->
+    <div id="loading">
+        <div class="loader"></div>
+        <div id="loading-text">正在從 Google Sheet 載入題庫...</div>
+    </div>
+
+    <!-- 遊戲 UI -->
+    <div id="ui">
+        <div class="word-container">
+            <div id="word-display">READY?</div>
+            <div id="chinese-hint"></div>
+        </div>
+        
+        <button id="start-btn" class="btn" onclick="startGame()">點擊開始 Start</button>
+        <div id="status"></div>
+        <button id="hint-btn" class="btn" onclick="playHint()">🔊 聽聽看怎麼唸</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+<script>
+    // --- 0. 音效資產設定 ---
+    const audioAssets = {
+        bgm: new Audio('https://cdn.pixabay.com/download/audio/2024/11/20/audio_6785a146c9.mp3?filename=abdipr-neko-komorebi-chill-lo-fi-266788.mp3'),
+        firework: new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_4056c4bffc.mp3?filename=freesound_community-single-firework-79814.mp3'),
+        success: new Audio('https://cdn.pixabay.com/download/audio/2023/11/12/audio_30bd7ff18f.mp3?filename=musheran-win-176035.mp3'),
+        error: new Audio('https://cdn.pixabay.com/download/audio/2022/02/11/audio_7f0bf4cdc0.mp3?filename=eritnhut1992-buzzer-or-wrong-answer-20582.mp3'),
+        ui: new Audio('https://cdn.pixabay.com/download/audio/2025/09/18/audio_37de472eec.mp3?filename=dragon-studio-bubble-pop-406640.mp3')
+    };
+
+    // 初始化 BGM 設定
+    audioAssets.bgm.loop = true;
+    audioAssets.bgm.volume = 0.5; // 預設音量
+
+    // 播放音效 helper (支援多重播放)
+    function playSound(type) {
+        if (!audioAssets[type]) return;
+
+        if (type === 'firework') {
+            // 煙火需要同時播放多聲，所以複製節點
+            const clone = audioAssets.firework.cloneNode();
+            clone.volume = 0.6; // 稍微小聲一點避免爆音
+            clone.play();
+        } else if (type === 'ui') {
+            const clone = audioAssets.ui.cloneNode();
+            clone.volume = 0.8;
+            clone.play();
+        } else {
+            // 一般音效直接播放 (重置時間軸)
+            audioAssets[type].currentTime = 0;
+            audioAssets[type].play().catch(e => console.log("Audio play failed", e));
+        }
+    }
+
+    // 音量淡入淡出 (Audio Ducking)
+    let fadeInterval;
+    function fadeBGM(targetVol) {
+        clearInterval(fadeInterval);
+        fadeInterval = setInterval(() => {
+            const currentVol = audioAssets.bgm.volume;
+            if (Math.abs(currentVol - targetVol) < 0.05) {
+                audioAssets.bgm.volume = targetVol;
+                clearInterval(fadeInterval);
+            } else if (currentVol > targetVol) {
+                audioAssets.bgm.volume -= 0.05;
+            } else {
+                audioAssets.bgm.volume += 0.05;
+            }
+        }, 50);
+    }
+
+    // --- 設定區 ---
+    const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSoov0tHBR7WZIEsFe89P_hE0iLbcMryPzaRHoUqIodf9RIQbCxEhuExj4NYhRRbor6dZ0FDUqtdE/pub?gid=0&single=true&output=csv';
+    
+    // --- 變數 ---
+    let words = []; 
+    let currentWordObj = null;
+    let isListening = false;
+    let recognition;
+    
+    // --- 1. 資料載入 ---
+    async function loadWordsFromSheet() {
+        const loadingDiv = document.getElementById('loading');
+        const loadingText = document.getElementById('loading-text');
+
+        try {
+            const response = await fetch(GOOGLE_SHEET_CSV_URL);
+            if (!response.ok) throw new Error("Network response was not ok");
+            const data = await response.text();
+            
+            const rows = data.split('\n').map(row => row.trim()).filter(row => row.length > 0);
+            if (rows.length > 0) rows.shift();
+
+            words = rows.map(row => {
+                const columns = row.split(',');
+                return {
+                    text: columns[0] ? columns[0].trim().toUpperCase() : "ERROR",
+                    category: columns[1] ? columns[1].trim() : "",
+                    chinese: columns[2] ? columns[2].trim() : "",
+                    level: columns[3] ? columns[3].trim() : ""
+                };
+            }).filter(w => w.text !== "ERROR" && w.text !== "");
+
+            console.log(`成功載入 ${words.length} 個單字`, words);
+            loadingDiv.style.display = 'none';
+
+        } catch (error) {
+            console.error("載入失敗:", error);
+            loadingText.innerText = "載入失敗，使用備用題庫。";
+            words = [
+                { text: "CAT", chinese: "貓", category: "Short A" },
+                { text: "DOG", chinese: "狗", category: "Short O" },
+                { text: "BUS", chinese: "公車", category: "Short U" }
+            ];
+            setTimeout(() => { loadingDiv.style.display = 'none'; }, 2000);
+        }
+    }
+
+    // --- 2. 遊戲邏輯 ---
+    const wordDisplay = document.getElementById('word-display');
+    const chineseDisplay = document.getElementById('chinese-hint');
+    const statusDisplay = document.getElementById('status');
+    const startBtn = document.getElementById('start-btn');
+    const hintBtn = document.getElementById('hint-btn');
+
+    function startGame() {
+        playSound('ui'); // 點擊音效
+        
+        if (words.length === 0) {
+            alert("題庫尚未載入完成");
+            return;
+        }
+
+        // 播放 BGM
+        audioAssets.bgm.play().then(() => {
+            console.log("BGM started");
+        }).catch(e => console.log("BGM autoplay prevented", e));
+
+        initSpeechRecognition();
+        
+        startBtn.style.display = 'none';
+        hintBtn.style.display = 'inline-block';
+        nextWord();
+    }
+
+    function nextWord() {
+        const randomIndex = Math.floor(Math.random() * words.length);
+        currentWordObj = words[randomIndex];
+        
+        wordDisplay.style.opacity = 0;
+        wordDisplay.style.transform = "scale(0.5)";
+        
+        setTimeout(() => {
+            wordDisplay.innerText = currentWordObj.text;
+            chineseDisplay.innerText = currentWordObj.chinese;
+            wordDisplay.style.opacity = 1;
+            wordDisplay.style.transform = "scale(1)";
+            
+            statusDisplay.innerText = "請大聲唸出來！";
+            statusDisplay.style.color = "#00ffaa";
+        }, 300);
+    }
+
+    function playHint() {
+        playSound('ui');
+        if (!currentWordObj) return;
+        
+        // 暫時將 BGM 轉小聲，讓使用者聽清楚示範
+        fadeBGM(0.1);
+
+        const utterance = new SpeechSynthesisUtterance(currentWordObj.text);
+        utterance.lang = 'en-US';
+        utterance.rate = 0.8;
+        
+        utterance.onend = () => {
+             // 如果目前沒有在語音辨識中，才恢復音量
+             if (!isListening) fadeBGM(0.5);
+        };
+
+        speechSynthesis.speak(utterance);
+    }
+
+    function checkAnswer(transcript) {
+        if (!currentWordObj) return;
+        
+        const target = currentWordObj.text;
+        
+        if (transcript.includes(target)) {
+            successTrigger();
+        } else {
+            playSound('error');
+            statusDisplay.innerText = `聽到: ${transcript} ... 再試一次`;
+            statusDisplay.style.color = "#ffaaaa";
+        }
+    }
+
+    function successTrigger() {
+        playSound('success');
+        statusDisplay.innerText = "太棒了！ Good Job!";
+        statusDisplay.style.color = "#ffff00";
+
+        wordDisplay.style.transform = "scale(1.5)";
+        wordDisplay.style.opacity = 0; 
+
+        // 煙火三連發
+        createExplosion(window.innerWidth / 2, window.innerHeight / 2);
+        
+        setTimeout(() => {
+            createExplosion(window.innerWidth / 2 - 150, window.innerHeight / 2 + 50);
+        }, 200);
+
+        setTimeout(() => {
+            createExplosion(window.innerWidth / 2 + 150, window.innerHeight / 2 - 50);
+        }, 400);
+
+        const praise = ["Great!", "Awesome!", "Good Job!", "Nice!", "Fantastic!"];
+        const utterance = new SpeechSynthesisUtterance(praise[Math.floor(Math.random()*praise.length)]);
+        speechSynthesis.speak(utterance);
+
+        setTimeout(nextWord, 2000);
+    }
+
+    // --- 3. 語音辨識 (Web Speech API) ---
+    function initSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        if (!SpeechRecognition) {
+            alert("您的瀏覽器不支援語音辨識，請使用 Chrome 電腦版或 Android 版。");
+            return;
+        }
+
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => { 
+            isListening = true; 
+            console.log("Mic ON - BGM volume down");
+            fadeBGM(0.1); // Ducking: BGM 變小聲
+        };
+
+        recognition.onend = () => { 
+            console.log("Mic OFF");
+            if (isListening) {
+                recognition.start(); // 自動重連
+            } else {
+                fadeBGM(0.5); // 恢復音量
+            }
+        };
+
+        recognition.onresult = (event) => {
+            const last = event.results.length - 1;
+            const transcript = event.results[last][0].transcript.trim().toUpperCase();
+            console.log("辨識結果:", transcript);
+            checkAnswer(transcript);
+        };
+
+        recognition.start();
+    }
+
+
+    // --- 4. Canvas 煙火粒子系統 ---
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    let particles = [];
+
+    function resize() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 8 + 2; 
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed;
+            this.life = 100;
+            this.color = color;
+            this.gravity = 0.15;
+            this.drag = 0.95;
+            this.size = Math.random() * 4 + 2;
+        }
+
+        update() {
+            this.vx *= this.drag;
+            this.vy *= this.drag;
+            this.vy += this.gravity;
+            this.x += this.vx;
+            this.y += this.vy;
+            this.life -= 1.5;
+            this.size *= 0.98;
+        }
+
+        draw() {
+            ctx.globalAlpha = Math.max(0, this.life / 100);
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function createExplosion(x, y) {
+        playSound('firework'); // 播放煙火音效
+
+        const colors = ['#FF1461', '#18FF92', '#5A87FF', '#FBF38C'];
+        for (let i = 0; i < 80; i++) { 
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function animate() {
+        ctx.fillStyle = 'rgba(17, 17, 17, 0.2)';
+        ctx.fillRect(0, 0, width, height);
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update();
+            particles[i].draw();
+            if (particles[i].life <= 0) {
+                particles.splice(i, 1);
+            }
+        }
+        requestAnimationFrame(animate);
+    }
+    
+    animate();
+    loadWordsFromSheet();
+
+</script>
+</body>
+</html>
