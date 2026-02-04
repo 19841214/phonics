@@ -169,21 +169,19 @@
     audioAssets.bgm.loop = true;
     audioAssets.bgm.volume = 0.5; // 預設音量
 
-    // 播放音效 helper (支援多重播放)
+    // 播放音效 helper
     function playSound(type) {
         if (!audioAssets[type]) return;
 
         if (type === 'firework') {
-            // 煙火需要同時播放多聲，所以複製節點
             const clone = audioAssets.firework.cloneNode();
-            clone.volume = 0.6; // 稍微小聲一點避免爆音
+            clone.volume = 0.6;
             clone.play();
         } else if (type === 'ui') {
             const clone = audioAssets.ui.cloneNode();
             clone.volume = 0.8;
             clone.play();
         } else {
-            // 一般音效直接播放 (重置時間軸)
             audioAssets[type].currentTime = 0;
             audioAssets[type].play().catch(e => console.log("Audio play failed", e));
         }
@@ -204,6 +202,28 @@
                 audioAssets.bgm.volume += 0.05;
             }
         }, 50);
+    }
+
+    // --- Utility: 編輯距離 (Levenshtein Distance) 用於模糊比對 ---
+    function getLevenshteinDistance(a, b) {
+        if (a.length === 0) return b.length;
+        if (b.length === 0) return a.length;
+        const matrix = [];
+        for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+        for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+                    );
+                }
+            }
+        }
+        return matrix[b.length][a.length];
     }
 
     // --- 設定區 ---
@@ -261,14 +281,13 @@
     const hintBtn = document.getElementById('hint-btn');
 
     function startGame() {
-        playSound('ui'); // 點擊音效
+        playSound('ui'); 
         
         if (words.length === 0) {
             alert("題庫尚未載入完成");
             return;
         }
 
-        // 播放 BGM
         audioAssets.bgm.play().then(() => {
             console.log("BGM started");
         }).catch(e => console.log("BGM autoplay prevented", e));
@@ -302,7 +321,6 @@
         playSound('ui');
         if (!currentWordObj) return;
         
-        // 暫時將 BGM 轉小聲，讓使用者聽清楚示範
         fadeBGM(0.1);
 
         const utterance = new SpeechSynthesisUtterance(currentWordObj.text);
@@ -310,23 +328,64 @@
         utterance.rate = 0.8;
         
         utterance.onend = () => {
-             // 如果目前沒有在語音辨識中，才恢復音量
              if (!isListening) fadeBGM(0.5);
         };
 
         speechSynthesis.speak(utterance);
     }
 
-    function checkAnswer(transcript) {
+    // --- 新版檢查邏輯 (寬容模式) ---
+    function checkAnswer(resultList) {
         if (!currentWordObj) return;
-        
         const target = currentWordObj.text;
         
-        if (transcript.includes(target)) {
+        let found = false;
+        let topTranscript = "";
+
+        // 如果 resultList 是空的 (很少見)
+        if (!resultList || resultList.length === 0) return;
+
+        topTranscript = resultList[0].transcript.trim().toUpperCase();
+
+        // 掃描所有 Google 給的候選答案 (Check Alternatives)
+        for (let i = 0; i < resultList.length; i++) {
+            let transcript = resultList[i].transcript.trim().toUpperCase();
+            // 移除標點符號
+            transcript = transcript.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+
+            console.log(`候選詞 [${i}]: ${transcript} (Target: ${target})`);
+
+            // 1. 寬鬆包含 (Loose Inclusion)
+            if (transcript.includes(target)) {
+                found = true;
+                break;
+            }
+
+            // 2. 模糊比對 (Fuzzy Match)
+            // 只有當目標字大於 3 個字母時才啟用容錯 (避免 CAT 變成 BAT)
+            if (target.length > 3) {
+                // 將句子拆成單字一一比對
+                const wordsInTranscript = transcript.split(/\s+/);
+                for (let w of wordsInTranscript) {
+                    const dist = getLevenshteinDistance(w, target);
+                    // 允許 1 個字的拼寫誤差 (如 APPE -> APPLE)
+                    if (dist <= 1) {
+                        console.log(`模糊比對成功: ${w} ~= ${target}`);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (found) break;
+        }
+        
+        if (found) {
             successTrigger();
         } else {
             playSound('error');
-            statusDisplay.innerText = `聽到: ${transcript} ... 再試一次`;
+            // 顯示聽到的第一個結果讓使用者修正
+            statusDisplay.innerText = `聽到: ${topTranscript} ... 再試一次`;
             statusDisplay.style.color = "#ffaaaa";
         }
     }
@@ -339,7 +398,6 @@
         wordDisplay.style.transform = "scale(1.5)";
         wordDisplay.style.opacity = 0; 
 
-        // 煙火三連發
         createExplosion(window.innerWidth / 2, window.innerHeight / 2);
         
         setTimeout(() => {
@@ -370,28 +428,29 @@
         recognition.continuous = true;
         recognition.lang = 'en-US';
         recognition.interimResults = false;
-        recognition.maxAlternatives = 1;
+        // 關鍵修改：允許回傳最多 10 個候選結果，大幅提高判定機率
+        recognition.maxAlternatives = 10; 
 
         recognition.onstart = () => { 
             isListening = true; 
-            console.log("Mic ON - BGM volume down");
-            fadeBGM(0.1); // Ducking: BGM 變小聲
+            console.log("Mic ON");
+            fadeBGM(0.1); 
         };
 
         recognition.onend = () => { 
             console.log("Mic OFF");
             if (isListening) {
-                recognition.start(); // 自動重連
+                recognition.start(); 
             } else {
-                fadeBGM(0.5); // 恢復音量
+                fadeBGM(0.5);
             }
         };
 
         recognition.onresult = (event) => {
             const last = event.results.length - 1;
-            const transcript = event.results[last][0].transcript.trim().toUpperCase();
-            console.log("辨識結果:", transcript);
-            checkAnswer(transcript);
+            // 傳入整個結果列表 (SpeechRecognitionResult) 而不僅是第一個
+            const resultList = event.results[last]; 
+            checkAnswer(resultList);
         };
 
         recognition.start();
@@ -447,7 +506,7 @@
     }
 
     function createExplosion(x, y) {
-        playSound('firework'); // 播放煙火音效
+        playSound('firework');
 
         const colors = ['#FF1461', '#18FF92', '#5A87FF', '#FBF38C'];
         for (let i = 0; i < 80; i++) { 
