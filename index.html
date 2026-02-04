@@ -13,7 +13,7 @@
             background: #111; 
             font-family: 'Fredoka One', cursive, sans-serif;
             user-select: none;
-            -webkit-touch-callout: none; /* iOS 禁止長按選單 */
+            -webkit-touch-callout: none;
         }
 
         canvas { 
@@ -26,7 +26,7 @@
 
         #ui {
             position: absolute;
-            top: 45%; /*稍微往上，留空間給麥克風 */
+            top: 40%; /* 稍微往上挪，給下方吉祥物空間 */
             left: 50%;
             transform: translate(-50%, -50%);
             text-align: center;
@@ -43,7 +43,7 @@
         }
 
         #word-display {
-            font-size: 7rem; /* 稍微調小適應手機 */
+            font-size: 6rem; /* 字稍微縮小一點避免太擠 */
             color: #fff;
             text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 4px 4px 0px #333;
             letter-spacing: 5px;
@@ -69,7 +69,6 @@
             text-shadow: 1px 1px 2px #000;
         }
 
-        /* 通用按鈕樣式 */
         .btn {
             padding: 15px 30px;
             font-size: 1.5rem;
@@ -100,16 +99,40 @@
             display: none;
         }
 
-        /* --- 麥克風按鈕專區 --- */
+        /* --- 麥克風與吉祥物區 --- */
         #mic-container {
             position: absolute;
-            bottom: 40px;
+            bottom: 20px; /* 貼近底部 */
             left: 50%;
             transform: translateX(-50%);
             z-index: 20;
-            display: none; /* 開始後才顯示 */
+            display: none; /* 開始後改為 flex */
+            flex-direction: row; /* 水平排列 */
+            align-items: flex-end; /* 底部對齊 */
+            justify-content: center;
+            gap: 20px; /* 圖片與按鈕的間距 */
+            width: 100%;
+            max-width: 600px;
+            pointer-events: none; /* 容器不擋點擊 */
+        }
+
+        /* 吉祥物圖片樣式 */
+        #mascot-img {
+            height: 220px; /* 大大的圖片！ */
+            width: auto;
+            object-fit: contain;
+            pointer-events: none; /* 圖片不擋點擊 */
+            filter: drop-shadow(0 0 10px rgba(0,0,0,0.5));
+            transition: transform 0.1s;
+        }
+
+        /* 麥克風控制組 (包含按鈕與文字) */
+        #mic-controls {
+            display: flex;
             flex-direction: column;
             align-items: center;
+            pointer-events: auto; /* 恢復按鈕點擊 */
+            margin-bottom: 20px;
         }
 
         #mic-btn {
@@ -130,7 +153,6 @@
             user-select: none;
         }
 
-        /* 按住時的效果 */
         #mic-btn.active {
             background: #ff0055;
             border-color: #ffaaaa;
@@ -143,6 +165,9 @@
             color: #888;
             font-size: 1rem;
             font-family: 'Noto Sans TC', sans-serif;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 8px;
+            border-radius: 10px;
         }
 
         #loading {
@@ -168,6 +193,13 @@
             margin-bottom: 20px;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* 手機版適配：如果螢幕太小，圖片稍微縮小一點點，但還是保持大大的 */
+        @media (max-width: 400px) {
+            #mascot-img { height: 180px; }
+            #mic-btn { width: 80px; height: 80px; font-size: 2.5rem; }
+            #word-display { font-size: 4rem; }
+        }
     </style>
 </head>
 <body>
@@ -190,34 +222,44 @@
         <button id="hint-btn" class="btn" onclick="playHint()">🔊 提示音</button>
     </div>
 
-    <!-- 麥克風控制區 (取代原本的自動偵測) -->
+    <!-- 麥克風與吉祥物控制區 -->
     <div id="mic-container">
-        <div id="mic-btn">🎤</div>
-        <div id="mic-hint">按住說話</div>
+        <!-- 大大的吉祥物圖片 -->
+        <img id="mascot-img" src="https://i.postimg.cc/zDbWrp7j/Gemini-Generated-Image-xdwialxdwialxdwi-removebg-preview.png" alt="Mascot">
+        
+        <!-- 麥克風按鈕 -->
+        <div id="mic-controls">
+            <div id="mic-btn">🎤</div>
+            <div id="mic-hint">按住說話</div>
+        </div>
     </div>
 
     <canvas id="canvas"></canvas>
 
 <script>
-    // --- 0. 音效資產設定 ---
+    // --- 圖片網址設定 ---
+    const MASCOT_NORMAL = 'https://i.postimg.cc/zDbWrp7j/Gemini-Generated-Image-xdwialxdwialxdwi-removebg-preview.png';
+    const MASCOT_ACTIVE = 'https://i.postimg.cc/zXwyzQgT/Gemini-Generated-Image-hv182whv182whv18-removebg-preview.png';
+
+    // 預先載入錄音中的圖片，避免第一次按下去時圖片閃爍
+    new Image().src = MASCOT_ACTIVE;
+
+    // --- 音效資產設定 ---
     const audioAssets = {
         bgm: new Audio('https://cdn.pixabay.com/download/audio/2024/11/20/audio_6785a146c9.mp3?filename=abdipr-neko-komorebi-chill-lo-fi-266788.mp3'),
         firework: new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_4056c4bffc.mp3?filename=freesound_community-single-firework-79814.mp3'),
         success: new Audio('https://cdn.pixabay.com/download/audio/2023/11/12/audio_30bd7ff18f.mp3?filename=musheran-win-176035.mp3'),
         error: new Audio('https://cdn.pixabay.com/download/audio/2022/02/11/audio_7f0bf4cdc0.mp3?filename=eritnhut1992-buzzer-or-wrong-answer-20582.mp3'),
         ui: new Audio('https://cdn.pixabay.com/download/audio/2025/09/18/audio_37de472eec.mp3?filename=dragon-studio-bubble-pop-406640.mp3'),
-        micStart: new Audio('https://cdn.pixabay.com/download/audio/2022/03/24/audio_c8c2a5c5a6.mp3?filename=uiclick-97915.mp3') // 新增：按鈕音效
+        micStart: new Audio('https://cdn.pixabay.com/download/audio/2022/03/24/audio_c8c2a5c5a6.mp3?filename=uiclick-97915.mp3')
     };
 
-    // 初始化 BGM
     audioAssets.bgm.loop = true;
     audioAssets.bgm.volume = 0.5;
 
-    // Helper: 播放音效
     function playSound(type) {
         if (!audioAssets[type]) return;
         
-        // 錯誤音效播放時，絕對不應該在收音，這裡只是播放聲音
         if (type === 'firework') {
             const clone = audioAssets.firework.cloneNode();
             clone.volume = 0.6;
@@ -232,7 +274,6 @@
         }
     }
 
-    // Helper: 音量淡入淡出 (Audio Ducking)
     let fadeInterval;
     function fadeBGM(targetVol) {
         clearInterval(fadeInterval);
@@ -250,7 +291,7 @@
         }, 50);
     }
 
-    // --- Utility: Levenshtein Distance (模糊比對) ---
+    // --- Utility: Levenshtein Distance ---
     function getLevenshteinDistance(a, b) {
         if (a.length === 0) return b.length;
         if (b.length === 0) return a.length;
@@ -272,14 +313,12 @@
         return matrix[b.length][a.length];
     }
 
-    // --- 變數與資料 ---
     const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSoov0tHBR7WZIEsFe89P_hE0iLbcMryPzaRHoUqIodf9RIQbCxEhuExj4NYhRRbor6dZ0FDUqtdE/pub?gid=0&single=true&output=csv';
     let words = []; 
     let currentWordObj = null;
     let recognition;
-    let isMicHeld = false; // 追蹤按鈕是否被按著
+    let isMicHeld = false;
 
-    // --- 1. 資料載入 ---
     async function loadWordsFromSheet() {
         const loadingDiv = document.getElementById('loading');
         try {
@@ -301,13 +340,11 @@
             loadingDiv.style.display = 'none';
         } catch (error) {
             console.error("載入失敗:", error);
-            // 備用
             words = [{ text: "CAT", chinese: "貓" }, { text: "DOG", chinese: "狗" }];
             setTimeout(() => { loadingDiv.style.display = 'none'; }, 2000);
         }
     }
 
-    // --- 2. UI 邏輯 ---
     const wordDisplay = document.getElementById('word-display');
     const chineseDisplay = document.getElementById('chinese-hint');
     const statusDisplay = document.getElementById('status');
@@ -316,6 +353,7 @@
     const micContainer = document.getElementById('mic-container');
     const micBtn = document.getElementById('mic-btn');
     const micHint = document.getElementById('mic-hint');
+    const mascotImg = document.getElementById('mascot-img'); // 取得吉祥物圖片
 
     function startGame() {
         playSound('ui');
@@ -323,11 +361,10 @@
 
         audioAssets.bgm.play().catch(e => console.log("BGM autoplay prevented", e));
         
-        // 初始化語音辨識 (但不開始，等按鈕)
         initSpeechRecognition();
 
         startBtn.style.display = 'none';
-        micContainer.style.display = 'flex'; // 顯示麥克風按鈕
+        micContainer.style.display = 'flex'; // 開始後才顯示麥克風區
         hintBtn.style.display = 'inline-block';
         nextWord();
     }
@@ -344,7 +381,7 @@
             chineseDisplay.innerText = currentWordObj.chinese;
             wordDisplay.style.opacity = 1;
             wordDisplay.style.transform = "scale(1)";
-            statusDisplay.innerText = "按住下方麥克風說話";
+            statusDisplay.innerText = "按住麥克風說話";
             statusDisplay.style.color = "#00ffaa";
         }, 300);
     }
@@ -357,20 +394,17 @@
         utterance.lang = 'en-US';
         utterance.rate = 0.8;
         utterance.onend = () => { 
-            // 只有在沒有按住麥克風時才恢復音量
             if (!isMicHeld) fadeBGM(0.5); 
         };
         speechSynthesis.speak(utterance);
     }
 
-    // --- 3. 麥克風按鈕互動邏輯 (Push to Talk) ---
-    // 支援滑鼠與觸控
+    // --- 麥克風互動 ---
     micBtn.addEventListener('mousedown', startListening);
     micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startListening(); });
     
-    // 放開時停止
     micBtn.addEventListener('mouseup', stopListening);
-    micBtn.addEventListener('mouseleave', stopListening); // 滑鼠移出也算放開
+    micBtn.addEventListener('mouseleave', stopListening); 
     micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopListening(); });
 
     function startListening() {
@@ -379,16 +413,20 @@
         
         playSound('micStart');
         micBtn.classList.add('active');
+        
+        // 切換吉祥物圖片 -> 聽
+        mascotImg.src = MASCOT_ACTIVE;
+        
         micHint.innerText = "聆聽中...";
         statusDisplay.innerText = "Listening...";
         statusDisplay.style.color = "#fff";
 
-        fadeBGM(0.1); // BGM 變小
+        fadeBGM(0.1);
 
         try {
             recognition.start();
         } catch (e) {
-            console.log("Recognition start error (already started?):", e);
+            console.log("Recognition start error:", e);
         }
     }
 
@@ -397,17 +435,18 @@
         isMicHeld = false;
 
         micBtn.classList.remove('active');
-        micHint.innerText = "按住說話";
         
-        // 恢復 BGM (稍後 checkAnswer 會決定是否繼續)
-        fadeBGM(0.5); 
+        // 切換吉祥物圖片 -> 待機
+        mascotImg.src = MASCOT_NORMAL;
+
+        micHint.innerText = "按住說話";
+        fadeBGM(0.5);
 
         if (recognition) {
             recognition.stop();
         }
     }
 
-    // --- 4. 語音辨識設定 ---
     function initSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -416,7 +455,6 @@
         }
 
         recognition = new SpeechRecognition();
-        // 改為 false，因為我們手動控制 start/stop
         recognition.continuous = true; 
         recognition.interimResults = false;
         recognition.maxAlternatives = 10; 
@@ -435,25 +473,20 @@
             }
         };
         
-        // 不再自動 restart (onend 空著即可，或做狀態清理)
         recognition.onend = () => {
-            console.log("Recognition ended");
-            // 確保按鈕狀態復原 (萬一系統自動斷開)
+            // 例外防護：如果系統強制中斷，確保圖片和狀態復原
             if (isMicHeld) {
                 isMicHeld = false;
                 micBtn.classList.remove('active');
+                mascotImg.src = MASCOT_NORMAL;
                 fadeBGM(0.5);
             }
         };
     }
 
-    // --- 5. 答案檢查邏輯 ---
     function checkAnswer(resultList) {
         if (!currentWordObj) return;
         
-        // 因為是 onresult 觸發，此時手應該已經放開，麥克風已停止
-        // 這符合「錯誤/正確時不應繼續收音」的需求
-
         const target = currentWordObj.text;
         let found = false;
         let topTranscript = "";
@@ -481,7 +514,7 @@
         if (found) {
             successTrigger();
         } else {
-            playSound('error'); // 這裡播放錯誤音效，此時 mic 已經 stop 了
+            playSound('error');
             statusDisplay.innerText = `聽到: ${topTranscript} ... 再試一次`;
             statusDisplay.style.color = "#ffaaaa";
         }
@@ -506,7 +539,7 @@
         setTimeout(nextWord, 2000);
     }
 
-    // --- 6. Canvas 粒子 ---
+    // --- Canvas 粒子系統 ---
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     let width, height;
