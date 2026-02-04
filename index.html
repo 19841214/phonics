@@ -24,14 +24,35 @@
             z-index: 1;
         }
 
-        #ui {
+        /* --- 新增：全螢幕排版容器 (Flexbox) --- */
+        #game-layout {
             position: absolute;
-            top: 40%; /* 稍微往上挪，給下方吉祥物空間 */
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            z-index: 10;
+            top: 0;
+            left: 0;
             width: 100%;
+            height: 100%;
+            z-index: 10;
+            display: flex;
+            flex-direction: column; /* 上下排列 */
+            pointer-events: none; /* 讓點擊穿透到 Canvas (如果有的話) */
+        }
+
+        /* 上半部：文字與狀態區 */
+        #ui {
+            /* 移除原本的 absolute 定位，改用 flex 佔滿剩餘空間 */
+            position: relative;
+            top: auto;
+            left: auto;
+            transform: none;
+            
+            flex: 1; /* 自動佔據剩餘高度，確保不與下方重疊 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center; /* 內容垂直置中 */
+            width: 100%;
+            pointer-events: auto; /* 恢復按鈕點擊 */
+            padding-top: 20px;
         }
 
         .word-container {
@@ -39,21 +60,23 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }
 
         #word-display {
-            font-size: 6rem; /* 字稍微縮小一點避免太擠 */
+            /* 使用 vmin 讓字體根據螢幕長寬自動縮放，避免過大 */
+            font-size: 15vmin; 
             color: #fff;
             text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 4px 4px 0px #333;
             letter-spacing: 5px;
             transition: transform 0.2s, opacity 0.3s;
             cursor: pointer;
+            line-height: 1;
         }
         
         #chinese-hint {
             font-family: 'Noto Sans TC', sans-serif;
-            font-size: 1.8rem;
+            font-size: 5vmin; /* 跟隨螢幕縮放 */
             color: #aaa;
             margin-top: 10px;
             opacity: 0.8;
@@ -99,40 +122,45 @@
             display: none;
         }
 
-        /* --- 麥克風與吉祥物區 --- */
+        /* --- 下半部：麥克風與吉祥物區 --- */
         #mic-container {
-            position: absolute;
-            bottom: 20px; /* 貼近底部 */
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 20;
-            display: none; /* 開始後改為 flex */
-            flex-direction: row; /* 水平排列 */
-            align-items: flex-end; /* 底部對齊 */
-            justify-content: center;
-            gap: 20px; /* 圖片與按鈕的間距 */
+            /* 移除 absolute，改為 flex item */
+            position: relative;
+            bottom: auto;
+            left: auto;
+            transform: none;
+            
             width: 100%;
-            max-width: 600px;
-            pointer-events: none; /* 容器不擋點擊 */
+            /* 這些是控制內容排列 */
+            display: none; /* JS 切換 display: flex */
+            flex-direction: row; 
+            align-items: flex-end; 
+            justify-content: center;
+            gap: 20px;
+            
+            padding-bottom: 20px; /* 底部留白 */
+            flex-shrink: 0; /* 禁止被壓縮，保證圖片完整 */
+            pointer-events: none; 
         }
 
         /* 吉祥物圖片樣式 */
         #mascot-img {
-            height: 220px; /* 大大的圖片！ */
+            height: 220px; 
+            /* 限制最大高度，避免在橫向手機螢幕佔據太多空間 */
+            max-height: 35vh; 
             width: auto;
             object-fit: contain;
-            pointer-events: none; /* 圖片不擋點擊 */
+            pointer-events: none; 
             filter: drop-shadow(0 0 10px rgba(0,0,0,0.5));
             transition: transform 0.1s;
         }
 
-        /* 麥克風控制組 (包含按鈕與文字) */
         #mic-controls {
             display: flex;
             flex-direction: column;
             align-items: center;
             pointer-events: auto; /* 恢復按鈕點擊 */
-            margin-bottom: 20px;
+            margin-bottom: 10px; /* 稍微對齊圖片底部 */
         }
 
         #mic-btn {
@@ -194,11 +222,10 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* 手機版適配：如果螢幕太小，圖片稍微縮小一點點，但還是保持大大的 */
+        /* 手機版微調 */
         @media (max-width: 400px) {
-            #mascot-img { height: 180px; }
+            #mascot-img { height: 160px; } /* 手機上縮小一點點 */
             #mic-btn { width: 80px; height: 80px; font-size: 2.5rem; }
-            #word-display { font-size: 4rem; }
         }
     </style>
 </head>
@@ -210,27 +237,30 @@
         <div id="loading-text">正在從 Google Sheet 載入題庫...</div>
     </div>
 
-    <!-- 遊戲 UI -->
-    <div id="ui">
-        <div class="word-container">
-            <div id="word-display">READY?</div>
-            <div id="chinese-hint"></div>
+    <!-- 主要排版容器 -->
+    <div id="game-layout">
+        <!-- 上半部：遊戲 UI -->
+        <div id="ui">
+            <div class="word-container">
+                <div id="word-display">READY?</div>
+                <div id="chinese-hint"></div>
+            </div>
+            
+            <button id="start-btn" class="btn" onclick="startGame()">點擊開始 Start</button>
+            <div id="status"></div>
+            <button id="hint-btn" class="btn" onclick="playHint()">🔊 提示音</button>
         </div>
-        
-        <button id="start-btn" class="btn" onclick="startGame()">點擊開始 Start</button>
-        <div id="status"></div>
-        <button id="hint-btn" class="btn" onclick="playHint()">🔊 提示音</button>
-    </div>
 
-    <!-- 麥克風與吉祥物控制區 -->
-    <div id="mic-container">
-        <!-- 大大的吉祥物圖片 -->
-        <img id="mascot-img" src="https://i.postimg.cc/zDbWrp7j/Gemini-Generated-Image-xdwialxdwialxdwi-removebg-preview.png" alt="Mascot">
-        
-        <!-- 麥克風按鈕 -->
-        <div id="mic-controls">
-            <div id="mic-btn">🎤</div>
-            <div id="mic-hint">按住說話</div>
+        <!-- 下半部：麥克風與吉祥物 -->
+        <div id="mic-container">
+            <!-- 大大的吉祥物圖片 -->
+            <img id="mascot-img" src="https://i.postimg.cc/zDbWrp7j/Gemini-Generated-Image-xdwialxdwialxdwi-removebg-preview.png" alt="Mascot">
+            
+            <!-- 麥克風按鈕 -->
+            <div id="mic-controls">
+                <div id="mic-btn">🎤</div>
+                <div id="mic-hint">按住說話</div>
+            </div>
         </div>
     </div>
 
@@ -241,7 +271,7 @@
     const MASCOT_NORMAL = 'https://i.postimg.cc/zDbWrp7j/Gemini-Generated-Image-xdwialxdwialxdwi-removebg-preview.png';
     const MASCOT_ACTIVE = 'https://i.postimg.cc/zXwyzQgT/Gemini-Generated-Image-hv182whv182whv18-removebg-preview.png';
 
-    // 預先載入錄音中的圖片，避免第一次按下去時圖片閃爍
+    // 預先載入錄音中的圖片
     new Image().src = MASCOT_ACTIVE;
 
     // --- 音效資產設定 ---
@@ -353,7 +383,7 @@
     const micContainer = document.getElementById('mic-container');
     const micBtn = document.getElementById('mic-btn');
     const micHint = document.getElementById('mic-hint');
-    const mascotImg = document.getElementById('mascot-img'); // 取得吉祥物圖片
+    const mascotImg = document.getElementById('mascot-img'); 
 
     function startGame() {
         playSound('ui');
@@ -364,7 +394,7 @@
         initSpeechRecognition();
 
         startBtn.style.display = 'none';
-        micContainer.style.display = 'flex'; // 開始後才顯示麥克風區
+        micContainer.style.display = 'flex'; // Flex 排版
         hintBtn.style.display = 'inline-block';
         nextWord();
     }
@@ -414,7 +444,6 @@
         playSound('micStart');
         micBtn.classList.add('active');
         
-        // 切換吉祥物圖片 -> 聽
         mascotImg.src = MASCOT_ACTIVE;
         
         micHint.innerText = "聆聽中...";
@@ -436,7 +465,6 @@
 
         micBtn.classList.remove('active');
         
-        // 切換吉祥物圖片 -> 待機
         mascotImg.src = MASCOT_NORMAL;
 
         micHint.innerText = "按住說話";
@@ -474,7 +502,6 @@
         };
         
         recognition.onend = () => {
-            // 例外防護：如果系統強制中斷，確保圖片和狀態復原
             if (isMicHeld) {
                 isMicHeld = false;
                 micBtn.classList.remove('active');
